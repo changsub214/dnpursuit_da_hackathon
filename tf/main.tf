@@ -2,29 +2,32 @@ resource "google_project_service" "services" {
   for_each = toset([
     "compute.googleapis.com",
     "bigquery.googleapis.com",
-    "storage.googleapis.com",
-    "run.googleapis.com", 
-    "artifactregistry.googleapis.com",
-    "cloudbuild.googleapis.com", 
-    "modelarmor.googleapis.com"
+    "storage.googleapis.com"
   ])
   project = var.gcp_project_id
   service = each.key
 }
 
-resource "google_storage_bucket" "cloud-bucket" {
-  name                        = "${var.gcp_project_id}-bucket"
-  location                    = var.gcp_region 
-  project                     = var.gcp_project_id
-  force_destroy               = true # Optional: Allows deletion of non-empty buckets during terraform destroy
-  public_access_prevention    = "inherited" # Explicitly set, though often default. For public, we override with IAM.
+resource "google_compute_network" "vpc_network" {
+  project                 = var.gcp_project_id
+  name                    = "qwiklab-vpc"
+  auto_create_subnetworks = true
 }
 
-resource "google_storage_bucket_iam_member" "public_access" {
-  bucket = google_storage_bucket.cloud-bucket.name
-  role   = "roles/storage.objectViewer"
-  member = "allUsers"
+resource "google_storage_bucket" "cloud-bucket" {
+  name                        = "${var.gcp_project_id}-bucket"
+  location                    = var.gcp_region
+  project                     = var.gcp_project_id
+  force_destroy               = true # Optional: Allows deletion of non-empty buckets during terraform destroy
+  public_access_prevention    = "enforced"
+  uniform_bucket_level_access = true
 }
+
+# resource "google_storage_bucket_iam_member" "public_access" {
+#   bucket = google_storage_bucket.cloud-bucket.name
+#   role   = "roles/storage.objectViewer"
+#   member = "allUsers"
+# }
 
 # ------------------------------------------------------------------------------
 # Review GCS Upload
@@ -43,7 +46,7 @@ resource "google_storage_bucket_object" "file_uploads" {
   for_each = local.review_files_to_upload
 
   bucket = google_storage_bucket.cloud-bucket.name
-  name   = "review/${each.key}" 
+  name   = "review/${each.key}"
   source = "${var.local_review_directory}/${each.key}"
 
   # Optional: Automatically determine and set the MIME type for the object.
@@ -58,8 +61,10 @@ resource "google_storage_bucket_object" "file_uploads" {
 # BigQuery
 # ------------------------------------------------------------------------------
 resource "google_bigquery_dataset" "dataset" {
-  dataset_id                  = "cymbal"
-  location                    = var.gcp_region
+  dataset_id                   = "cymbal"
+  location                     = var.gcp_region
+  delete_contents_on_destroy  = true
+  default_table_expiration_ms = 2592000000
 }
 
 # ------------------------------------------------------------------------------
@@ -104,12 +109,12 @@ resource "google_storage_bucket_object" "alchemy_csv_upload" {
 }
 
 # ------------------------------------------------------------------------------
-# Upload the products.json file to GCS
+# Upload the products_info.csv file to GCS
 # ------------------------------------------------------------------------------
-resource "google_storage_bucket_object" "products_json_upload" {
+resource "google_storage_bucket_object" "products_csv_upload" {
   bucket = google_storage_bucket.cloud-bucket.name
-  name   = "bq_data/products.json" # Object name in GCS
-  source = "bq/products.json"      # Path to local json file
+  name   = "bq_data/products_info.csv" # Object name in GCS
+  source = "bq/products_info.csv"      # Path to local json file
 
   depends_on = [
     google_storage_bucket.cloud-bucket
@@ -156,11 +161,12 @@ resource "google_compute_instance" "lab_setup" {
     }
   }
 
-  network_interface {
-    network = "default"
+  shielded_instance_config {
+    enable_secure_boot = true
+  }
 
-    access_config {
-    }
+  network_interface {
+    network = google_compute_network.vpc_network.name
   }
   service_account {
     scopes = [
@@ -216,7 +222,7 @@ resource "google_bigquery_job" "load_products_data" {
 
   load {
     source_uris = [
-      "gs://${google_storage_bucket.cloud-bucket.name}/${google_storage_bucket_object.products_json_upload.name}"
+      "gs://${google_storage_bucket.cloud-bucket.name}/${google_storage_bucket_object.products_csv_upload.name}"
     ]
 
     destination_table {
@@ -225,75 +231,14 @@ resource "google_bigquery_job" "load_products_data" {
       table_id   = google_bigquery_table.products_table.table_id
     }
 
-    source_format      = "NEWLINE_DELIMITED_JSON"
+    source_format      = "CSV"
+    skip_leading_rows  = 1
     write_disposition  = "WRITE_TRUNCATE" # Overwrite table if it exists
     #autodetect         = false # Rely on the table's predefined schema
   }
 
   depends_on = [
-    google_storage_bucket_object.products_json_upload,
+    google_storage_bucket_object.products_csv_upload,
     google_bigquery_table.products_table
   ]
-}
-
-# ------------------------------------------------------------------------------
-# Model Armor Cloud Run
-# ------------------------------------------------------------------------------
-resource "google_cloud_run_v2_service" "model_armor_demo" {
-  project  = var.gcp_project_id
-  name     = "model-armor-demo"
-  location = var.gcp_region
-
-  template {
-    containers {
-      image = "docker.io/mnleedocker/model-armor-demo:latest"
-      ports {
-        container_port = "8080"
-      }
-
-      env {
-         name  = "GCP_PROJECT_ID"
-         value = var.gcp_project_id
-       }
-      env {
-         name  = "GCP_LOCATION"
-         value = var.gcp_region
-       }
-      env {
-         name  = "MODEL_ARMOR_TEMPLATE_ID"
-         value = "model-armor-demo"
-       }
-
-      resources {
-         limits = {
-           cpu    = "1000m" # 1 CPU
-           memory = "2Gi" 
-         }
-       }
-    }
-
-    scaling {
-       min_instance_count = 1 
-       max_instance_count = 3 
-    }
-
-    execution_environment = "EXECUTION_ENVIRONMENT_GEN2"
-  }
-
-  traffic {
-    type    = "TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST"
-    percent = 100
-  }
-  depends_on = [google_project_service.services]   
-}
-
-resource "google_cloud_run_v2_service_iam_member" "allow_public_access" {
-  project  = google_cloud_run_v2_service.model_armor_demo.project
-  location = google_cloud_run_v2_service.model_armor_demo.location
-  name     = google_cloud_run_v2_service.model_armor_demo.name 
-
-  role   = "roles/run.invoker" 
-  member = "allUsers"     
-
-  depends_on = [google_cloud_run_v2_service.model_armor_demo]     
 }
