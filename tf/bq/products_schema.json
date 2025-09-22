@@ -1,16 +1,11 @@
 [
   {"name": "id", "type": "STRING", "mode": "REQUIRED"},
   {"name": "title", "type": "STRING", "mode": "REQUIRED"},
-  {"name": "images", "type": "RECORD", "mode": "REPEATED", "fields": [
-    {"name": "uri", "type": "STRING", "mode": "NULLABLE"}
-  ]},
   {"name": "uri", "type": "STRING", "mode": "NULLABLE"},
   {"name": "availability", "type": "STRING", "mode": "NULLABLE"},
-  {"name": "priceInfo", "type": "RECORD", "mode": "NULLABLE", "fields": [
-    {"name": "price", "type": "FLOAT", "mode": "NULLABLE"},
-    {"name": "currencyCode", "type": "STRING", "mode": "NULLABLE"}
-  ]},
-  {"name": "tags", "type": "STRING", "mode": "REPEATED"},
   {"name": "categories", "type": "STRING", "mode": "REPEATED"},
-  {"name": "primaryProductId", "type": "STRING", "mode": "NULLABLE"}
+  {"name": "product_id", "type": "STRING", "mode": "NULLABLE"},
+  {"name": "price", "type": "FLOAT", "mode": "NULLABLE"},
+  {"name": "average_rating", "type": "STRING", "mode": "NULLABLE"},
+  {"name": "review_count", "type": "FLOAT", "mode": "NULLABLE"}
 ]
