@@ -15,6 +15,7 @@ resource "google_project_service" "services" {
     "aiplatform.googleapis.com",
     "pubsub.googleapis.com",
     "iam.googleapis.com",
+    "cloudaicompanion.googleapis.com",
   ])
   project = var.gcp_project_id
   service = each.key
@@ -127,6 +128,7 @@ resource "google_storage_bucket_object" "file_uploads" {
 resource "google_bigquery_dataset" "dataset" {
   dataset_id                   = "cymbal"
   location                     = var.gcp_region
+  project                      = var.gcp_project_id
   delete_contents_on_destroy  = true
   default_table_expiration_ms = 2592000000
 }
@@ -138,7 +140,7 @@ resource "google_bigquery_table" "customers_table" {
   project    = var.gcp_project_id
   dataset_id = google_bigquery_dataset.dataset.dataset_id
   table_id   = "customers"
-  schema     = file("bq/alchemy_data1.json") # Path relative to the main.tf file
+  schema     = file("rawdata/alchemy_data1.json") # Path relative to the main.tf file
 
   depends_on = [
     google_bigquery_dataset.dataset
@@ -152,7 +154,7 @@ resource "google_bigquery_table" "products_table" {
   project    = var.gcp_project_id
   dataset_id = google_bigquery_dataset.dataset.dataset_id
   table_id   = "products"
-  schema     = file("bq/products_schema.json") # Path relative to the main.tf file
+  schema     = file("rawdata/products_schema.json") # Path relative to the main.tf file
 
   depends_on = [
     google_bigquery_dataset.dataset
@@ -213,7 +215,7 @@ resource "google_bigquery_table" "negative_customer_segment_products" {
 resource "google_storage_bucket_object" "alchemy_csv_upload" {
   bucket = google_storage_bucket.cloud-bucket.name
   name   = "bq_data/alchemy_data1.csv" # Object name in GCS
-  source = "bq/alchemy_data1.csv"      # Path to local CSV file, relative to main.tf
+  source = "rawdata/alchemy_data1.csv"      # Path to local CSV file, relative to main.tf
 
   depends_on = [
     google_storage_bucket.cloud-bucket
@@ -226,7 +228,7 @@ resource "google_storage_bucket_object" "alchemy_csv_upload" {
 resource "google_storage_bucket_object" "products_csv_upload" {
   bucket = google_storage_bucket.cloud-bucket.name
   name   = "bq_data/products_info.csv" # Object name in GCS
-  source = "bq/products_info.csv"      # Path to local json file
+  source = "rawdata/products_info.csv"      # Path to local json file
 
   depends_on = [
     google_storage_bucket.cloud-bucket
@@ -252,6 +254,32 @@ resource "google_storage_bucket_object" "eventdata_py_upload" {
   bucket = google_storage_bucket.cloud-bucket.name
   name   = "eventdata/update_event_time.py" # Object name in GCS
   source = "eventdata/update_event_time.py"      # Path to local json file
+
+  depends_on = [
+    google_storage_bucket.cloud-bucket
+  ]
+}
+
+# ------------------------------------------------------------------------------
+# Upload the customer_review_enforcement file to GCS
+# ------------------------------------------------------------------------------
+resource "google_storage_bucket_object" "customer_review_enforcement_upload" {
+  bucket = google_storage_bucket.cloud-bucket.name
+  name   = "task5/customer_review_enforcement.csv" # Object name in GCS
+  source = "rawdata/customer_review_enforcement.csv" # Local path to file
+
+  depends_on = [
+    google_storage_bucket.cloud-bucket
+  ]
+}
+
+# ------------------------------------------------------------------------------
+# Upload the product_info_enforcement file to GCS
+# ------------------------------------------------------------------------------
+resource "google_storage_bucket_object" "product_info_enforcement_upload" {
+  bucket = google_storage_bucket.cloud-bucket.name
+  name   = "task5/product_info_enforcement.csv" # Object name in GCS
+  source = "rawdata/product_info_enforcement.csv" # Local path to file
 
   depends_on = [
     google_storage_bucket.cloud-bucket
@@ -290,7 +318,12 @@ resource "google_compute_instance" "lab_setup" {
   metadata = {
     startup-script     = file("script/startup.sh")
   }
-  depends_on = [google_storage_bucket_object.eventdata_json_upload, google_storage_bucket_object.eventdata_py_upload]
+  depends_on = [
+    google_storage_bucket_object.eventdata_json_upload, 
+    google_storage_bucket_object.eventdata_py_upload,
+    google_storage_bucket_object.customer_review_enforcement_upload,
+    google_storage_bucket_object.product_info_enforcement_upload,
+  ]
 }
 
 # ------------------------------------------------------------------------------
