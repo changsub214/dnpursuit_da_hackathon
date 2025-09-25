@@ -171,7 +171,7 @@ resource "google_bigquery_dataset" "continuous_queries" {
   labels = {
     env = "prod"
   }
-  depends_on = [google_project_service.enable_apis]
+  depends_on = [google_project_service.services]
 }
 
 resource "google_bigquery_table" "negative_customer_segment_products" {
@@ -366,7 +366,7 @@ resource "google_pubsub_topic" "recapture_customer" {
   labels = {
     foo = "recapture_customer"
   }
-  depends_on = [google_project_service.enable_apis]
+  depends_on = [google_project_service.services]
 }
 resource "google_pubsub_subscription" "recapture_customer_sub" {
   name    = "recapture_customer_subscription"
