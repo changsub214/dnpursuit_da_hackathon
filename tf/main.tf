@@ -1,8 +1,20 @@
+data "google_project" "project" {
+  project_id = var.gcp_project_id
+}
+
+locals {
+  compute_service_account = "serviceAccount:${data.google_project.project.number}-compute@developer.gserviceaccount.com"
+}
+
 resource "google_project_service" "services" {
   for_each = toset([
     "compute.googleapis.com",
     "bigquery.googleapis.com",
-    "storage.googleapis.com"
+    "storage.googleapis.com",
+    "bigqueryunified.googleapis.com",
+    "aiplatform.googleapis.com",
+    "pubsub.googleapis.com",
+    "iam.googleapis.com",
   ])
   project = var.gcp_project_id
   service = each.key
@@ -23,11 +35,63 @@ resource "google_storage_bucket" "cloud-bucket" {
   uniform_bucket_level_access = true
 }
 
+# ------------------------------------------------------------------------------
+# IAM Roles for the Compute Engine default service account
+# ------------------------------------------------------------------------------
+
+resource "google_project_iam_member" "biquery_data_editor" {
+  project = var.gcp_project_id
+  role    = "roles/bigquery.dataEditor"
+  member  = local.compute_service_account
+  depends_on = [
+    google_project_service.services
+  ]
+}
+
+resource "google_project_iam_member" "biquery_user" {
+  project = var.gcp_project_id
+  role    = "roles/bigquery.user"
+  member  = local.compute_service_account
+  depends_on = [
+    google_project_service.services
+  ]
+}
+
+resource "google_project_iam_member" "aiplatform_user" {
+  project = var.gcp_project_id
+  role    = "roles/aiplatform.user"
+  member  = local.compute_service_account
+  depends_on = [
+    google_project_service.services
+  ]
+}
+
 # resource "google_storage_bucket_iam_member" "public_access" {
 #   bucket = google_storage_bucket.cloud-bucket.name
 #   role   = "roles/storage.objectViewer"
 #   member = "allUsers"
 # }
+
+# ------------------------------------------------------------------------------
+# Service Account for BigQuery Continuous Query
+# ------------------------------------------------------------------------------
+resource "google_service_account" "bq_continuous_query_sa" {
+  account_id   = "bq-continuous-query-sa"
+  display_name = "BigQuery Continuous Query Service Account"
+  project      = var.gcp_project_id
+  depends_on   = [google_project_service.services] 
+}
+resource "google_project_iam_member" "bq_job_user" {
+  project = var.gcp_project_id
+  role    = "roles/bigquery.jobUser"
+  member  = "serviceAccount:${google_service_account.bq_continuous_query_sa.email}"
+}
+resource "google_bigquery_dataset_iam_member" "sa_dataset_editor" {
+  dataset_id = google_bigquery_dataset.continuous_queries.dataset_id
+  role       = "roles/bigquery.dataEditor"
+  member     = "serviceAccount:${google_service_account.bq_continuous_query_sa.email}"
+  depends_on = [google_bigquery_dataset.continuous_queries]
+}
 
 # ------------------------------------------------------------------------------
 # Review GCS Upload
@@ -93,6 +157,54 @@ resource "google_bigquery_table" "products_table" {
   depends_on = [
     google_bigquery_dataset.dataset
   ]
+}
+
+# ------------------------------------------------------------------------------
+# BigQuery Dataset for Continuous Queries
+# ------------------------------------------------------------------------------
+resource "google_bigquery_dataset" "continuous_queries" {
+  dataset_id  = "continuous_queries"
+  description = "BigQuery dataset for continuous queries"
+  location    = var.gcp_region
+  project     = var.gcp_project_id
+
+  labels = {
+    env = "prod"
+  }
+  depends_on = [google_project_service.enable_apis]
+}
+
+resource "google_bigquery_table" "negative_customer_segment_products" {
+  dataset_id = google_bigquery_dataset.continuous_queries.dataset_id
+  table_id   = "negative_customer_segment_products"
+  project    = var.gcp_project_id
+  schema = jsonencode([
+    {
+      name = "customer_id",
+      type = "INTEGER"
+    },
+    {
+      name = "customer_name",
+      type = "STRING"
+    },
+    {
+      name = "customer_email",
+      type = "STRING"
+    },
+    {
+      name = "segment",
+      type = "STRING"
+    },
+    {
+      name = "top_products",
+      type = "STRING"
+    },
+    {
+      name = "recommended_products",
+      type = "STRING"
+    }
+  ])
+  depends_on = [google_bigquery_dataset.continuous_queries]
 }
 
 # ------------------------------------------------------------------------------
@@ -241,4 +353,27 @@ resource "google_bigquery_job" "load_products_data" {
     google_storage_bucket_object.products_csv_upload,
     google_bigquery_table.products_table
   ]
+}
+
+# ------------------------------------------------------------------------------
+# Pub/Sub Topic for Event Data
+# ------------------------------------------------------------------------------
+
+resource "google_pubsub_topic" "recapture_customer" {
+  name    = "recapture_customer"
+  project = var.gcp_project_id
+
+  labels = {
+    foo = "recapture_customer"
+  }
+  depends_on = [google_project_service.enable_apis]
+}
+resource "google_pubsub_subscription" "recapture_customer_sub" {
+  name    = "recapture_customer_subscription"
+  topic   = google_pubsub_topic.recapture_customer.name
+  project = var.gcp_project_id
+
+  ack_deadline_seconds = 10
+  
+  depends_on = [google_pubsub_topic.recapture_customer]
 }
