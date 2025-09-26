@@ -3,7 +3,7 @@
   {"name": "title", "type": "STRING", "mode": "REQUIRED"},
   {"name": "uri", "type": "STRING", "mode": "NULLABLE"},
   {"name": "availability", "type": "STRING", "mode": "NULLABLE"},
-  {"name": "categories", "type": "STRING", "mode": "REPEATED"},
+  {"name": "categories", "type": "STRING", "mode": "NULLABLE"},
   {"name": "product_id", "type": "STRING", "mode": "NULLABLE"},
   {"name": "price", "type": "FLOAT", "mode": "NULLABLE"},
   {"name": "average_rating", "type": "STRING", "mode": "NULLABLE"},
